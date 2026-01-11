@@ -1,45 +1,90 @@
-# fetch_live_scores.py
-import requests
+import firebase_admin
+from firebase_admin import credentials, firestore
+import os
 import json
-from firebase_admin import credentials, firestore, initialize_app
-import time
+import requests
+from bs4 import BeautifulSoup
+from datetime import datetime
 
-cred = credentials.Certificate("serviceAccountKey.json")
-initialize_app(cred)
+# Environment variable'dan Firebase credentials oku
+creds_json = os.environ.get('FIREBASE_CREDENTIALS')
+if creds_json:
+    cred_dict = json.loads(creds_json)
+    cred = credentials.Certificate(cred_dict)
+else:
+    # Lokal test için (opsiyonel)
+    cred = credentials.Certificate("serviceAccountKey.json")
+
+firebase_admin.initialize_app(cred)
+
 db = firestore.client()
 
-def fetch_sofascore():
+def fetch_live_scores():
+    """Mackolik'ten canli mac sonuclarini ceker"""
+    url = "https://www.mackolik.com/canli-sonuclar"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    
     try:
-        response = requests.get('https://www.sofascore.com/api/v1/sport/football/events/live')
-        data = response.json()
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        soup = BeautifulSoup(response.content, 'lxml')
         
-        matches = []
-        for event in data.get('events', []):
-            matches.append({
-                'id': str(event['id']),
-                'league': event['tournament']['name'],
-                'country': event['tournament']['category']['name'],
-                'homeTeam': event['homeTeam']['name'],
-                'awayTeam': event['awayTeam']['name'],
-                'homeScore': event.get('homeScore', {}).get('current', 0),
-                'awayScore': event.get('awayScore', {}).get('current', 0),
-                'status': event['status']['type']
-            })
+        maclar = []
+        mac_elemanlari = soup.find_all('div', class_='match-row')
         
-        db.collection('liveMatches').document('current').set({
-            'matches': matches,
-            'lastUpdate': firestore.SERVER_TIMESTAMP
-        })
+        for mac in mac_elemanlari[:20]:  # Ilk 20 mac
+            try:
+                ev_sahibi = mac.find('span', class_='home-team').text.strip()
+                deplasman = mac.find('span', class_='away-team').text.strip()
+                skor = mac.find('span', class_='score').text.strip()
+                durum = mac.find('span', class_='status').text.strip()
+                
+                maclar.append({
+                    'ev_sahibi': ev_sahibi,
+                    'deplasman': deplasman,
+                    'skor': skor,
+                    'durum': durum,
+                    'guncelleme_zamani': datetime.now().isoformat()
+                })
+            except AttributeError:
+                continue
         
-        print("Basarili! " + str(len(matches)) + " mac guncellendi")
-        return True
+        return maclar
     
     except Exception as e:
-        print("Hata: " + str(e))
-        return False
+        print(f"Hata: {e}")
+        return []
 
-if __name__ == "__main__":
-    print("Canli mac botu baslatildi...")
-    while True:
-        fetch_sofascore()
-        time.sleep(30)
+def update_firestore(maclar):
+    """Firebase'e mac sonuclarini kaydeder"""
+    if not maclar:
+        print("Guncellenecek mac bulunamadi")
+        return
+    
+    try:
+        collection_ref = db.collection('mac_sonuclari')
+        
+        # Eski kayitlari sil
+        docs = collection_ref.stream()
+        for doc in docs:
+            doc.reference.delete()
+        
+        # Yeni kayitlari ekle
+        for mac in maclar:
+            collection_ref.add(mac)
+        
+        print(f"Basarili! {len(maclar)} mac guncellendi")
+    
+    except Exception as e:
+        print(f"Firebase hatasi: {e}")
+
+def fetch_and_update_scores():
+    """Ana fonksiyon: Skorlari cek ve guncelle"""
+    print("Mac sonuclari cekiliyor...")
+    maclar = fetch_live_scores()
+    update_firestore(maclar)
+
+if __name__ == '__main__':
+    fetch_and_update_scores()
