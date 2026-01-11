@@ -1,65 +1,53 @@
-import requests
-from bs4 import BeautifulSoup
-from firebase_admin import credentials, firestore
-import firebase_admin
-import os
-import json
+from flask import Flask
+import threading
+import time
+from fetch_live_scores import fetch_and_update_scores
 
-# Environment variable'dan Firebase credentials oku
-creds_json = os.environ.get('FIREBASE_CREDENTIALS')
-if creds_json:
-    cred_dict = json.loads(creds_json)
-    cred = credentials.Certificate(cred_dict)
-else:
-    cred = credentials.Certificate("serviceAccountKey.json")
+app = Flask(__name__)
 
-if not firebase_admin._apps:
-    firebase_admin.initialize_app(cred)
+@app.route('/')
+def home():
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Maç Sonuçları Tracker</title>
+        <meta charset="utf-8">
+    </head>
+    <body style="font-family: Arial; text-align: center; padding: 50px;">
+        <h1>✅ Maç Sonuçları Tracker Çalışıyor!</h1>
+        <p>🔄 Her 30 saniyede bir güncelleniyor</p>
+        <p>⚽ SofaScore'dan canlı maç verileri çekiliyor</p>
+    </body>
+    </html>
+    """
 
-db = firestore.client()
+@app.route('/health')
+def health():
+    return {"status": "healthy", "message": "Bot aktif"}, 200
 
-def fetch_live_scores():
-    url = "https://www.sofascore.com/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-    }
+def run_scheduler():
+    """Her 30 saniyede bir skorları güncelle"""
     
-    response = requests.get(url, headers=headers)
-    soup = BeautifulSoup(response.content, "html.parser")
-    
-    matches = []
-    match_elements = soup.find_all("div", class_="event")
-    
-    for match in match_elements:
-        try:
-            home_team = match.find("div", class_="participant-home").text.strip()
-            away_team = match.find("div", class_="participant-away").text.strip()
-            score = match.find("div", class_="score").text.strip()
-            
-            matches.append({
-                "ev_sahibi": home_team,
-                "deplasman": away_team,
-                "skor": score
-            })
-        except:
-            continue
-    
-    return matches
-
-def update_firestore(matches):
-    collection_ref = db.collection("mac_sonuclari")
-    docs = collection_ref.stream()
-    for doc in docs:
-        doc.reference.delete()
-    
-    for match in matches:
-        collection_ref.add(match)
-    
-    print(f"Basarili! {len(matches)} mac guncellendi")
-
-def fetch_and_update_scores():
-    matches = fetch_live_scores()
-    update_firestore(matches)
-
-if __name__ == "__main__":
+    # İlk başta 1 kez çalıştır
+    print("🚀 İlk güncelleme başlıyor...")
     fetch_and_update_scores()
+    
+    while True:
+        time.sleep(30)  # 30 saniye bekle
+        print("🔄 Yeni güncelleme başlıyor...")
+        fetch_and_update_scores()
+
+if __name__ == '__main__':
+    # Scheduler'ı arka planda çalıştır
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+    
+    print("=" * 60)
+    print("✅ BOT BAŞLATILDI!")
+    print("🔄 Her 30 saniyede güncelleme yapılacak")
+    print("⚽ SofaScore → Firebase otomatik senkronizasyon")
+    print("=" * 60)
+    
+    # Flask'ı başlat (Render canlı tutmak için)
+    app.run(host='0.0.0.0', port=10000)
