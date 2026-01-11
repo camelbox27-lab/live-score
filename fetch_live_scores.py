@@ -28,8 +28,6 @@ def fetch_live_scores():
     soup = BeautifulSoup(response.content, "html.parser")
     
     matches = []
-    
-    # SofaScore'dan maç verilerini çek
     match_elements = soup.find_all("div", class_="event")
     
     for match in match_elements:
@@ -50,13 +48,10 @@ def fetch_live_scores():
 
 def update_firestore(matches):
     collection_ref = db.collection("mac_sonuclari")
-    
-    # Eski verileri sil
     docs = collection_ref.stream()
     for doc in docs:
         doc.reference.delete()
     
-    # Yeni verileri ekle
     for match in matches:
         collection_ref.add(match)
     
