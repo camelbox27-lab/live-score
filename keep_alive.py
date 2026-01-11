@@ -14,17 +14,35 @@ def health():
     return {"status": "healthy"}, 200
 
 def run_scheduler():
+    # 5 saniye bekle (Flask başlasın)
+    time.sleep(5)
+    
+    print("=" * 60)
     print("BOT BASLATILDI - Her 30 saniyede guncelleme")
+    print("=" * 60)
     print("Ilk guncelleme basliyor...")
-    fetch_live_scores.fetch_and_update_scores()
+    
+    try:
+        fetch_live_scores.fetch_and_update_scores()
+    except Exception as e:
+        print(f"Hata: {e}")
     
     while True:
         time.sleep(30)
+        print("=" * 60)
         print("Yeni guncelleme...")
-        fetch_live_scores.fetch_and_update_scores()
+        print("=" * 60)
+        try:
+            fetch_live_scores.fetch_and_update_scores()
+        except Exception as e:
+            print(f"Hata: {e}")
 
 if __name__ == '__main__':
+    print("Flask baslaniyor...")
+    
     scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
     scheduler_thread.start()
+    
+    print("Thread baslatildi!")
     
     app.run(host='0.0.0.0', port=10000)
