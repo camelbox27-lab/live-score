@@ -20,34 +20,64 @@ if not firebase_admin._apps:
 db = firestore.client()
 
 def fetch_live_scores():
-    """SofaScore'dan canlı maç verilerini çeker"""
-    url = "https://www.sofascore.com/"
+    url = "https://www.sofascore.com/tr/"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
     try:
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status()
         soup = BeautifulSoup(response.content, "html.parser")
-        matches = []
-        match_elements = soup.find_all("div", class_="event")
         
-        for match in match_elements[:30]:
+        matches = []
+        
+        # Tüm olası class isimlerini dene
+        selectors = [
+            {"class_": "event"},
+            {"class_": "match"},
+            {"class_": "Box"},
+            {"attrs": {"data-testid": "event-item"}},
+        ]
+        
+        match_elements = []
+        for selector in selectors:
+            found = soup.find_all("div", **selector)
+            if found:
+                match_elements = found[:30]
+                print(f"Bulunan selector: {selector}")
+                break
+        
+        if not match_elements:
+            print("Hicbir mac elementi bulunamadi")
+            print("HTML icerigi kontrol ediliyor...")
+            # HTML'in bir kısmını yazdır
+            print(soup.prettify()[:500])
+        
+        for match in match_elements:
             try:
-                home_team = match.find("div", class_="participant-home").text.strip()
-                away_team = match.find("div", class_="participant-away").text.strip()
-                score = match.find("div", class_="score").text.strip()
+                # Farklı yapıları dene
+                home = match.find("div", class_="participant-home") or match.find("div", class_="homeParticipant")
+                away = match.find("div", class_="participant-away") or match.find("div", class_="awayParticipant")
+                score_elem = match.find("div", class_="score") or match.find("div", class_="detailScore")
                 
-                matches.append({
-                    "ev_sahibi": home_team,
-                    "deplasman": away_team,
-                    "skor": score,
-                    "guncelleme_zamani": datetime.now().isoformat()
-                })
-            except:
+                if home and away:
+                    home_team = home.text.strip()
+                    away_team = away.text.strip()
+                    score = score_elem.text.strip() if score_elem else "0-0"
+                    
+                    matches.append({
+                        "ev_sahibi": home_team,
+                        "deplasman": away_team,
+                        "skor": score,
+                        "guncelleme_zamani": datetime.now().isoformat()
+                    })
+            except Exception as e:
                 continue
         
-        print(f"✅ {len(matches)} maç bulundu")
+        print(f"✅ {len(matches)} mac bulundu")
         return matches
         
     except Exception as e:
@@ -56,7 +86,7 @@ def fetch_live_scores():
 
 def update_firestore(matches):
     if not matches:
-        print("⚠️ Güncellenecek maç bulunamadı")
+        print("⚠️ Guncellenecek mac bulunamadi")
         return
     
     try:
@@ -68,14 +98,13 @@ def update_firestore(matches):
         for idx, match in enumerate(matches):
             collection_ref.document(f"mac_{idx}").set(match)
         
-        print(f"✅ {len(matches)} maç güncellendi")
+        print(f"✅ {len(matches)} mac guncellendi")
         
     except Exception as e:
-        print(f"❌ Firebase hatası: {e}")
+        print(f"❌ Firebase hatasi: {e}")
 
 def fetch_and_update_scores():
-    """Ana fonksiyon"""
-    print(f"🔄 Maç sonuçları güncelleniyor...")
+    print(f"🔄 Mac sonuclari guncelleniyor...")
     matches = fetch_live_scores()
     update_firestore(matches)
 
